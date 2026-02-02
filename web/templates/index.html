@@ -1,0 +1,14 @@
+<!doctype html>
+<html>
+<head><title>ATC Monitor</title></head>
+<body>
+    <h1>Recent Messages</h1>
+    {% for m in messages %}
+        <div>
+            <strong>{{ m.callsign or "UNKNOWN" }}</strong>
+            ({{ m.speaker }}):
+            {{ m.text }}
+        </div>
+    {% endfor %}
+</body>
+</html>
