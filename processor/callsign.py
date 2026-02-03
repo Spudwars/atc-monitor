@@ -118,13 +118,14 @@ class CallsignExtractor:
 
     def load_callsigns_from_csv(self, csv_path: str) -> None:
         """Load callsign mappings from CSV file."""
-        import pandas as pd
-        df = pd.read_csv(csv_path)
-        for _, row in df.iterrows():
-            self._callsign_db[row['callsign'].upper()] = (
-                row.get('operator', ''),
-                row.get('icao', '')
-            )
+        import csv
+        with open(csv_path, 'r') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                self._callsign_db[row['callsign'].upper()] = (
+                    row.get('operator', ''),
+                    row.get('icao', '')
+                )
 
     def normalize_phonetic(self, text: str) -> str:
         """Convert phonetic alphabet/numbers to standard form."""

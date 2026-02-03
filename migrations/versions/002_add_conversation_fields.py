@@ -38,11 +38,19 @@ def upgrade(conn: sqlite3.Connection) -> None:
         ON messages(conversation_id)
     """)
 
-    # Create index for timestamp-based queries
-    cursor.execute("""
-        CREATE INDEX IF NOT EXISTS idx_messages_timestamp
-        ON messages(timestamp)
-    """)
+    # Create index for timestamp-based queries (handle both schemas)
+    cursor.execute("PRAGMA table_info(messages)")
+    columns = {row[1] for row in cursor.fetchall()}
+    if 'timestamp' in columns:
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_messages_timestamp
+            ON messages(timestamp)
+        """)
+    elif 'timestamp_start' in columns:
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_messages_timestamp
+            ON messages(timestamp_start)
+        """)
 
     conn.commit()
 

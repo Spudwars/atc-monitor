@@ -287,24 +287,34 @@ def update_message_analysis(
     operator: Optional[str] = None,
     icao_code: Optional[str] = None,
     speaker: Optional[str] = None,
-    conversation_id: Optional[str] = None
+    conversation_id: Optional[str] = None,
+    keywords: Optional[str] = None,
 ) -> int:
     """
     Update analysis fields on an existing message.
 
     Only updates fields that are provided (not None).
+    Gracefully handles missing columns in the database.
     """
+    # Get existing columns in the messages table
+    conn = get_connection()
+    cursor = conn.execute("PRAGMA table_info(messages)")
+    existing_columns = {row[1] for row in cursor.fetchall()}
+    conn.close()
+
     data = {}
-    if callsign is not None:
+    if callsign is not None and 'callsign' in existing_columns:
         data['callsign'] = callsign
-    if operator is not None:
+    if operator is not None and 'operator' in existing_columns:
         data['operator'] = operator
-    if icao_code is not None:
+    if icao_code is not None and 'icao_code' in existing_columns:
         data['icao_code'] = icao_code
-    if speaker is not None:
+    if speaker is not None and 'speaker' in existing_columns:
         data['speaker'] = speaker
-    if conversation_id is not None:
+    if conversation_id is not None and 'conversation_id' in existing_columns:
         data['conversation_id'] = conversation_id
+    if keywords is not None and 'keywords' in existing_columns:
+        data['keywords'] = keywords
 
     if not data:
         return 0
