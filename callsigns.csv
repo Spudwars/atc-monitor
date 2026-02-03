@@ -1,5 +1,34 @@
 callsign,operator,icao
 SPEEDBIRD,British Airways,BAW
+SHAMROCK,Aer Lingus,EIN
 RYANAIR,Ryanair,RYR
 LUFTHANSA,Lufthansa,DLH
-SAS,Scandinavian Airlines,SAS
+AIRFRANS,Air France,AFR
+KLMROYAL,KLM Royal Dutch Airlines,KLM
+SCANDINAVIAN,Scandinavian Airlines,SAS
+VIKING,Norwegian Air Shuttle,NAX
+DELTA,Delta Air Lines,DAL
+UNITED,United Airlines,UAL
+AMERICAN,American Airlines,AAL
+EASY,easyJet,EZY
+JETBLUE,JetBlue Airways,JBU
+SOUTHWEST,Southwest Airlines,SWA
+EMIRATES,Emirates,UAE
+QANTAS,Qantas,QFA
+SPRINGBOK,South African Airways,SAA
+CATHAY,Cathay Pacific,CPA
+SINGAPORE,Singapore Airlines,SIA
+JAPAN AIR,Japan Airlines,JAL
+ANA,All Nippon Airways,ANA
+KOREAN AIR,Korean Air,KAL
+TURKISH,Turkish Airlines,THY
+SWISS,Swiss International,SWR
+AUSTRIAN,Austrian Airlines,AUA
+IBERIA,Iberia,IBE
+TAP,TAP Air Portugal,TAP
+FINNAIR,Finnair,FIN
+ICELANDAIR,Icelandair,ICE
+VIRGIN,Virgin Atlantic,VIR
+WIZZAIR,Wizz Air,WZZ
+EUROWINGS,Eurowings,EWG
+CONDOR,Condor,CFG
