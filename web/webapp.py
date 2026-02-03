@@ -6,21 +6,64 @@ Provides:
 - Tower view with live polling
 - Operator view
 - Conversation threading by callsign
+- Callsign management
 - Search with autosuggest
 - CSV/JSON export
-- Audio playback
+- Audio playback with UTC timestamps
 """
 
 import csv
 import io
-from flask import Flask, render_template, request, send_from_directory, jsonify, make_response
+import os
+from datetime import datetime, timedelta
+from flask import Flask, render_template, request, send_from_directory, jsonify, make_response, abort, redirect, url_for
 
-from processor.db import query_all, query_one
+from processor.db import query_all, query_one, insert, update, execute
+from processor.utils import parse_recording_filename, offset_to_utc, format_utc_time, seconds_to_timecode
 
 app = Flask(__name__)
 
-# Audio files directory
-AUDIO_DIR = "audio"
+# Audio files directory - use absolute path
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+AUDIO_DIR = os.path.join(BASE_DIR, "audio")
+
+
+# Template filters
+def safe_get(row, key, default=None):
+    """Safely get a value from sqlite3.Row or dict."""
+    try:
+        val = row[key]
+        return val if val is not None else default
+    except (KeyError, IndexError, TypeError):
+        return default
+
+
+@app.template_filter('utc_time')
+def utc_time_filter(message):
+    """Convert message timestamp to UTC time string."""
+    source_file = safe_get(message, 'source_file', '')
+    offset = safe_get(message, 'timestamp_start', 0) or 0
+    utc = offset_to_utc(source_file, float(offset))
+    if utc:
+        return utc.strftime("%H:%M:%S UTC")
+    return f"{float(offset):.1f}s"
+
+
+@app.template_filter('timecode')
+def timecode_filter(seconds):
+    """Convert seconds to timecode format."""
+    if seconds is None:
+        return ""
+    return seconds_to_timecode(float(seconds))
+
+
+@app.template_filter('audio_context_url')
+def audio_context_url_filter(message, context=30):
+    """Get URL for audio with context."""
+    source_file = safe_get(message, 'source_file', '')
+    offset = safe_get(message, 'timestamp_start', 0) or 0
+    start = max(0, float(offset) - context)
+    return f"/audio/{source_file}#t={start:.1f}"
 
 
 def get_messages_query(
@@ -83,7 +126,25 @@ def get_messages_query(
 @app.route("/audio/<filename>")
 def audio_file(filename):
     """Serve audio files for playback."""
-    return send_from_directory(AUDIO_DIR, filename)
+    # Ensure we're serving actual audio files
+    if not filename.endswith(('.mp3', '.wav', '.ogg', '.m4a')):
+        abort(404)
+
+    filepath = os.path.join(AUDIO_DIR, filename)
+    if not os.path.exists(filepath):
+        abort(404)
+
+    # Determine MIME type
+    mime_types = {
+        '.mp3': 'audio/mpeg',
+        '.wav': 'audio/wav',
+        '.ogg': 'audio/ogg',
+        '.m4a': 'audio/mp4',
+    }
+    ext = os.path.splitext(filename)[1].lower()
+    mimetype = mime_types.get(ext, 'audio/mpeg')
+
+    return send_from_directory(AUDIO_DIR, filename, mimetype=mimetype)
 
 
 # Dashboard - recent messages
@@ -244,6 +305,90 @@ def api_stats():
         "by_operator": {r["operator"]: r["count"] for r in by_operator if r["operator"]},
         "with_keywords": with_keywords["count"] if with_keywords else 0,
     })
+
+
+# Callsign management routes
+
+@app.route("/callsigns")
+def callsigns_list():
+    """Display and manage callsign mappings."""
+    try:
+        callsigns = query_all(
+            "SELECT * FROM callsign_mappings ORDER BY callsign ASC"
+        )
+    except Exception:
+        callsigns = []
+
+    return render_template("callsigns.html", callsigns=callsigns)
+
+
+@app.route("/callsigns/add", methods=["POST"])
+def callsigns_add():
+    """Add a new callsign mapping."""
+    callsign = request.form.get("callsign", "").strip().upper()
+    operator = request.form.get("operator", "").strip()
+    icao = request.form.get("icao", "").strip().upper()
+    country = request.form.get("country", "").strip()
+    notes = request.form.get("notes", "").strip()
+
+    if callsign:
+        try:
+            insert('callsign_mappings', {
+                'callsign': callsign,
+                'operator': operator,
+                'icao': icao,
+                'country': country,
+                'notes': notes,
+            })
+            # Reload the callsign extractor
+            from processor.callsign import reload_extractor
+            reload_extractor()
+        except Exception as e:
+            pass  # Duplicate or other error
+
+    return redirect(url_for('callsigns_list'))
+
+
+@app.route("/callsigns/delete/<int:callsign_id>", methods=["POST"])
+def callsigns_delete(callsign_id):
+    """Delete a callsign mapping."""
+    execute("DELETE FROM callsign_mappings WHERE id = ?", (callsign_id,))
+    from processor.callsign import reload_extractor
+    reload_extractor()
+    return redirect(url_for('callsigns_list'))
+
+
+@app.route("/callsigns/edit/<int:callsign_id>", methods=["POST"])
+def callsigns_edit(callsign_id):
+    """Edit an existing callsign mapping."""
+    operator = request.form.get("operator", "").strip()
+    icao = request.form.get("icao", "").strip().upper()
+    country = request.form.get("country", "").strip()
+    notes = request.form.get("notes", "").strip()
+
+    update('callsign_mappings', {
+        'operator': operator,
+        'icao': icao,
+        'country': country,
+        'notes': notes,
+        'updated_at': datetime.utcnow().isoformat(),
+    }, 'id = ?', (callsign_id,))
+
+    from processor.callsign import reload_extractor
+    reload_extractor()
+    return redirect(url_for('callsigns_list'))
+
+
+@app.route("/api/callsigns")
+def api_callsigns():
+    """API endpoint for callsign mappings."""
+    try:
+        callsigns = query_all(
+            "SELECT callsign, operator, icao, country FROM callsign_mappings ORDER BY callsign"
+        )
+        return jsonify([dict(c) for c in callsigns])
+    except Exception:
+        return jsonify([])
 
 
 if __name__ == "__main__":

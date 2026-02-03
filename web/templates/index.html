@@ -12,9 +12,11 @@
     .severity-emergency { background-color: #dc3545 !important; color: white; }
     .severity-alert { background-color: #ffc107 !important; }
     .severity-quality { background-color: #17a2b8 !important; color: white; }
-    audio { width: 150px; height: 30px; }
+    audio { width: 120px; height: 30px; }
     .navbar-brand { font-weight: bold; }
-    .message-text { max-width: 400px; }
+    .message-text { max-width: 350px; }
+    .time-info { font-size: 0.85em; }
+    .audio-links a { font-size: 0.8em; margin-left: 5px; }
   </style>
 </head>
 <body>
@@ -23,7 +25,8 @@
       <a class="navbar-brand" href="/">ATC Monitor</a>
       <div class="navbar-nav ms-auto">
         <a class="nav-link" href="/tower/EIDW">EIDW Tower</a>
-        <a class="nav-link" href="/api/stats">Stats API</a>
+        <a class="nav-link" href="/callsigns">Callsigns</a>
+        <a class="nav-link" href="/api/stats">Stats</a>
         <a class="nav-link" href="/export?format=json">Export</a>
       </div>
     </div>
@@ -55,7 +58,7 @@
       <table class="table table-striped table-hover">
         <thead class="table-dark">
           <tr>
-            <th>Time</th>
+            <th>Time (UTC)</th>
             <th>Airport</th>
             <th>Callsign</th>
             <th>Operator</th>
@@ -67,12 +70,9 @@
         <tbody>
           {% for m in messages %}
           <tr class="{% if m['severity'] == 'emergency' %}severity-emergency{% elif m['severity'] == 'alert' %}severity-alert{% elif m['severity'] == 'quality' %}severity-quality{% endif %}">
-            <td>
-              {% if m['timestamp'] %}
-                {{ m['timestamp'][:19] }}
-              {% elif m['timestamp_start'] %}
-                {{ m['timestamp_start']|round(1) }}s
-              {% endif %}
+            <td class="time-info">
+              {{ m|utc_time }}<br>
+              <small class="text-muted">{{ m['timestamp_start']|timecode if m['timestamp_start'] else '' }}</small>
             </td>
             <td>
               {% if m['airport'] %}
@@ -85,11 +85,11 @@
               {% if m['callsign'] %}
                 <a href="/conversation/{{ m['callsign'] }}" class="chip">{{ m['callsign'] }}</a>
               {% else %}
-                <span class="text-muted">Unknown</span>
+                <span class="text-muted">-</span>
               {% endif %}
             </td>
             <td>
-              {% if m['operator'] %}
+              {% if m['operator'] and m['operator'] != 'Unknown' %}
                 <a href="/operator/{{ m['operator'] }}">{{ m['operator'] }}</a>
               {% else %}
                 -
@@ -106,11 +106,14 @@
               {% endif %}
               {{ m['text'] or m['message'] or '' }}
             </td>
-            <td>
+            <td class="audio-links">
               {% if m['source_file'] %}
                 <audio controls preload="none">
-                  <source src="/audio/{{ m['source_file'] }}" type="audio/mpeg">
+                  <source src="/audio/{{ m['source_file'] }}#t={{ m['timestamp_start']|default(0) }}" type="audio/mpeg">
                 </audio>
+                <br>
+                <a href="{{ m|audio_context_url(30) }}" target="_blank" title="Play with 30s context">+Context</a>
+                <a href="/audio/{{ m['source_file'] }}" target="_blank" title="Full recording">Full</a>
               {% else %}
                 -
               {% endif %}
@@ -130,7 +133,8 @@
       <small>
         <a href="/export?format=csv">Export CSV</a> |
         <a href="/export?format=json">Export JSON</a> |
-        <a href="/api/messages">Messages API</a>
+        <a href="/api/messages">Messages API</a> |
+        <a href="/callsigns">Manage Callsigns</a>
       </small>
     </div>
   </div>

@@ -106,19 +106,20 @@ def analyze_message(message_id: int, text: str) -> dict:
     keywords = detect_keywords(text)
     severity = get_keyword_severity(keywords)
 
+    # Use empty string (not None) to clear old values
     result = {
         'speaker': speaker,
-        'callsign': None,
-        'operator': None,
-        'icao_code': None,
+        'callsign': '',  # Clear if no match
+        'operator': '',
+        'icao_code': '',
         'keywords': keywords,
         'severity': severity,
     }
 
     if callsign_match:
         result['callsign'] = callsign_match.callsign
-        result['operator'] = callsign_match.operator
-        result['icao_code'] = callsign_match.icao
+        result['operator'] = callsign_match.operator or ''
+        result['icao_code'] = callsign_match.icao or ''
 
     return result
 

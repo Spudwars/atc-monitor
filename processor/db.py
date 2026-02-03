@@ -303,16 +303,17 @@ def update_message_analysis(
     conn.close()
 
     data = {}
+    # Use 'is not None' check - empty string '' is valid to clear a field
     if callsign is not None and 'callsign' in existing_columns:
-        data['callsign'] = callsign
+        data['callsign'] = callsign if callsign else None  # Store as NULL if empty
     if operator is not None and 'operator' in existing_columns:
-        data['operator'] = operator
+        data['operator'] = operator if operator else None
     if icao_code is not None and 'icao_code' in existing_columns:
-        data['icao_code'] = icao_code
+        data['icao_code'] = icao_code if icao_code else None
     if speaker is not None and 'speaker' in existing_columns:
         data['speaker'] = speaker
     if conversation_id is not None and 'conversation_id' in existing_columns:
-        data['conversation_id'] = conversation_id
+        data['conversation_id'] = conversation_id if conversation_id else None
     if keywords is not None and 'keywords' in existing_columns:
         data['keywords'] = keywords
 
