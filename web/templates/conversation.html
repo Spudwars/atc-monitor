@@ -53,10 +53,15 @@
 
   <script>
     document.querySelectorAll('audio[data-start]').forEach(audio => {
-      audio.addEventListener('play', function() {
-        const start = parseFloat(this.dataset.start) || 0;
-        if (this.currentTime < start - 1) this.currentTime = start;
-      }, { once: true });
+      let seeked = false;
+      const doSeek = function() {
+        if (!seeked) {
+          const start = parseFloat(this.dataset.start) || 0;
+          if (start > 0) { this.currentTime = start; seeked = true; }
+        }
+      };
+      audio.addEventListener('loadedmetadata', doSeek);
+      audio.addEventListener('play', doSeek);
     });
   </script>
 </body>

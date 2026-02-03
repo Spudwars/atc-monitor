@@ -140,12 +140,21 @@
   <script>
     // Seek audio to timestamp when play starts
     document.querySelectorAll('audio[data-start]').forEach(audio => {
-      audio.addEventListener('play', function() {
-        const start = parseFloat(this.dataset.start) || 0;
-        if (this.currentTime < start - 1 || this.currentTime > start + 5) {
-          this.currentTime = start;
+      let seeked = false;
+      audio.addEventListener('loadedmetadata', function() {
+        if (!seeked) {
+          const start = parseFloat(this.dataset.start) || 0;
+          if (start > 0) this.currentTime = start;
+          seeked = true;
         }
-      }, { once: true });
+      });
+      audio.addEventListener('play', function() {
+        if (!seeked) {
+          const start = parseFloat(this.dataset.start) || 0;
+          if (start > 0) this.currentTime = start;
+          seeked = true;
+        }
+      });
     });
   </script>
 </body>
