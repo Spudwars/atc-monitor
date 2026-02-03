@@ -1,18 +1,15 @@
 """
-Callsign extraction module with regex + fuzzy matching for aviation communications.
+Callsign extraction module for ATC communications.
 
-Handles various callsign formats:
-- Airline callsigns: SPEEDBIRD 123, RYANAIR 456
-- ICAO format: BAW123, RYR456
-- General aviation: N12345, G-ABCD
-- Military: VIPER 01, MAGIC 42
+Extracts airline callsigns (e.g., "Shamrock 603", "Ryanair 5N", "United 980")
+while filtering out false positives like taxiways, runways, and flight levels.
+
+Callsigns are always two parts: airline name + flight identifier.
 """
 
 import re
 from dataclasses import dataclass
-from typing import Optional
-from functools import lru_cache
-
+from typing import Optional, List
 from processor.cache import get_cache
 
 
@@ -69,109 +66,195 @@ PHONETIC_NUMBERS = {
     'SEVEN': '7',
     'EIGHT': '8', 'AIT': '8',
     'NINE': '9', 'NINER': '9',
-    'HUNDRED': '00',
-    'THOUSAND': '000',
 }
 
-# Regex patterns for different callsign types
-PATTERNS = {
-    # Airline callsign with flight number: SPEEDBIRD 123, RYANAIR 4 5 6
-    'airline': re.compile(
-        r'\b([A-Z][A-Z]+)\s+(\d[\d\s]*\d|\d)\b',
-        re.IGNORECASE
-    ),
-    # ICAO 3-letter code + numbers: BAW123, RYR456
-    'icao': re.compile(
-        r'\b([A-Z]{3})(\d{1,4}[A-Z]?)\b',
-        re.IGNORECASE
-    ),
-    # US registration: N12345, N123AB
-    'us_registration': re.compile(
-        r'\b(N\d{1,5}[A-Z]{0,2})\b',
-        re.IGNORECASE
-    ),
-    # UK/European registration: G-ABCD, D-EFGH
-    'eu_registration': re.compile(
-        r'\b([A-Z]{1,2}-[A-Z]{3,4})\b',
-        re.IGNORECASE
-    ),
-    # Military callsign: VIPER 01, MAGIC 42
-    'military': re.compile(
-        r'\b([A-Z]+)\s+(ZERO\s+)?(ONE|TWO|THREE|FOUR|FIVE|SIX|SEVEN|EIGHT|NINE|NINER|\d+)\b',
-        re.IGNORECASE
-    ),
+# Words that indicate NOT a callsign (taxiways, runways, etc.)
+FALSE_POSITIVE_PREFIXES = {
+    # Taxiways (single letter designations)
+    'TAXIWAY', 'TAXI', 'TWY',
+    # Runways
+    'RUNWAY', 'RWY', 'RW',
+    # Flight levels and altitudes
+    'LEVEL', 'FLIGHT LEVEL', 'FL',
+    'ALTITUDE', 'ALT',
+    # Headings and speeds
+    'HEADING', 'HDG',
+    'SPEED', 'KNOTS', 'KT',
+    # Frequencies
+    'FREQUENCY', 'FREQ',
+    # Stands and gates
+    'STAND', 'GATE', 'APRON',
+    # Links and intersections (taxiway designators)
+    'LINK', 'HOLD', 'SHORT', 'VIA',
+    # General aviation terms
+    'SQUAWK', 'TRANSPONDER',
+    'DIRECT', 'PROCEED',
+    # Approach/departure fixes
+    'FIX', 'WAYPOINT', 'VOR', 'NDB',
+}
+
+# Words that when followed by a number are NOT callsigns
+NOT_CALLSIGN_CONTEXTS = [
+    r'\b(?:runway|rwy|rw)\s*\d',
+    r'\b(?:flight\s+)?level\s*\d',
+    r'\bfl\s*\d',
+    r'\b(?:heading|hdg)\s*\d',
+    r'\bsquawk\s*\d',
+    r'\bstand\s*\d',
+    r'\bgate\s*\d',
+    r'\bapron\s*\d',
+    r'\blink\s*\d',
+    r'\bhold\s+short\b',
+    r'\bfrequency\s*\d',
+    r'\b\d{3}\.\d',  # Frequencies like 121.5
+    r'\baltitude\s*\d',
+    r'\bspeed\s*\d',
+    r'\bknots?\b',
+]
+
+# Phonetic alphabet words that look like registrations but aren't
+PHONETIC_FALSE_POSITIVES = {
+    'X-RAY', 'X RAY', 'XRAY',
+    'T-TAG', 'T TAG',
+    'I-TAC', 'I TAC',
 }
 
 
 class CallsignExtractor:
-    """Extracts and normalizes callsigns from ATC communications."""
+    """Extracts and validates callsigns from ATC communications."""
 
-    def __init__(self, callsign_db: dict = None):
-        """
-        Initialize extractor with optional callsign database.
-
-        Args:
-            callsign_db: Dict mapping callsign names to (operator, icao) tuples
-        """
-        self._callsign_db = callsign_db or {}
+    def __init__(self):
+        """Initialize extractor with callsign database."""
+        self._callsign_db = {}
         self._cache = get_cache()
+
+    def load_callsigns_from_db(self, db_rows: list) -> None:
+        """Load callsign mappings from database rows."""
+        for row in db_rows:
+            self._callsign_db[row['callsign'].upper()] = (
+                row.get('operator', ''),
+                row.get('icao', '')
+            )
 
     def load_callsigns_from_csv(self, csv_path: str) -> None:
         """Load callsign mappings from CSV file."""
         import csv
-        with open(csv_path, 'r') as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                self._callsign_db[row['callsign'].upper()] = (
-                    row.get('operator', ''),
-                    row.get('icao', '')
-                )
+        try:
+            with open(csv_path, 'r') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    self._callsign_db[row['callsign'].upper()] = (
+                        row.get('operator', ''),
+                        row.get('icao', '')
+                    )
+        except FileNotFoundError:
+            pass
 
-    def normalize_phonetic(self, text: str) -> str:
-        """Convert phonetic alphabet/numbers to standard form."""
-        words = text.upper().split()
-        result = []
-        for word in words:
-            if word in PHONETIC_ALPHABET:
-                result.append(PHONETIC_ALPHABET[word])
-            elif word in PHONETIC_NUMBERS:
-                result.append(PHONETIC_NUMBERS[word])
-            else:
-                result.append(word)
-        return ' '.join(result)
+    def get_known_callsigns(self) -> List[str]:
+        """Get list of known callsign names."""
+        return list(self._callsign_db.keys())
 
-    def extract_all(self, text: str) -> list[CallsignMatch]:
+    def extract_all(self, text: str) -> List[CallsignMatch]:
         """
-        Extract all callsigns from text.
+        Extract all valid callsigns from text.
+
+        A valid callsign must be:
+        1. A known airline name followed by a flight number (e.g., "Shamrock 603")
+        2. An aircraft registration (e.g., "N12345", "G-ABCD")
 
         Args:
             text: Raw transcribed text
 
         Returns:
-            List of CallsignMatch objects, sorted by position
+            List of CallsignMatch objects
         """
-        cache_key = f"callsign_extract:{hash(text)}"
+        cache_key = f"callsign_v2:{hash(text)}"
         cached = self._cache.get(cache_key)
         if cached is not None:
             return cached
 
         matches = []
-        normalized = self.normalize_phonetic(text)
+        text_upper = text.upper()
 
-        # Try each pattern type
-        for pattern_name, pattern in PATTERNS.items():
-            for match in pattern.finditer(normalized):
-                callsign_match = self._process_match(
-                    match, pattern_name, text
-                )
-                if callsign_match:
-                    matches.append(callsign_match)
+        # First, check for false positive contexts
+        text_lower = text.lower()
+        false_positive_spans = set()
+        for pattern in NOT_CALLSIGN_CONTEXTS:
+            for match in re.finditer(pattern, text_lower):
+                for i in range(match.start(), match.end()):
+                    false_positive_spans.add(i)
 
-        # Remove overlapping matches, keeping highest confidence
+        # Pattern 1: Known airline name + flight number
+        # Flight numbers can be: digits, digits+letter, or spoken as phonetics
+        for callsign_name in self._callsign_db.keys():
+            # Escape special regex chars and make case insensitive
+            escaped_name = re.escape(callsign_name)
+            # Match: CALLSIGN + space + (digits or digits+letters)
+            pattern = rf'\b{escaped_name}\s+(\d+[A-Z]?|\d+)\b'
+            for match in re.finditer(pattern, text_upper, re.IGNORECASE):
+                # Check if this overlaps with false positive spans
+                if any(i in false_positive_spans for i in range(match.start(), match.end())):
+                    continue
+
+                flight_num = match.group(1)
+                # Require at least 1 digit in flight number
+                if not any(c.isdigit() for c in flight_num):
+                    continue
+
+                full_callsign = f"{callsign_name} {flight_num}"
+                operator, icao = self._callsign_db.get(callsign_name, (None, None))
+
+                matches.append(CallsignMatch(
+                    callsign=full_callsign,
+                    operator=operator,
+                    icao=icao,
+                    confidence=0.95,
+                    start_pos=match.start(),
+                    end_pos=match.end()
+                ))
+
+        # Pattern 2: US registration (N + digits + optional letters)
+        # Must be N followed by 1-5 digits and 0-2 letters
+        us_reg_pattern = r'\b(N\d{1,5}[A-Z]{0,2})\b'
+        for match in re.finditer(us_reg_pattern, text_upper):
+            if any(i in false_positive_spans for i in range(match.start(), match.end())):
+                continue
+            reg = match.group(1)
+            # Validate: must have at least 2 digits after N
+            digits = sum(1 for c in reg if c.isdigit())
+            if digits >= 2:
+                matches.append(CallsignMatch(
+                    callsign=reg,
+                    operator=None,
+                    icao=None,
+                    confidence=0.9,
+                    start_pos=match.start(),
+                    end_pos=match.end()
+                ))
+
+        # Pattern 3: European registration (X-XXXX or XX-XXX)
+        eu_reg_pattern = r'\b([A-Z]{1,2}-[A-Z]{3,4})\b'
+        for match in re.finditer(eu_reg_pattern, text_upper):
+            if any(i in false_positive_spans for i in range(match.start(), match.end())):
+                continue
+            reg = match.group(1)
+            # Skip phonetic alphabet false positives
+            if reg in PHONETIC_FALSE_POSITIVES or reg.replace('-', ' ') in PHONETIC_FALSE_POSITIVES:
+                continue
+            matches.append(CallsignMatch(
+                callsign=reg,
+                operator=None,
+                icao=None,
+                confidence=0.9,
+                start_pos=match.start(),
+                end_pos=match.end()
+            ))
+
+        # Deduplicate overlapping matches
         matches = self._deduplicate_matches(matches)
         matches.sort(key=lambda m: m.start_pos)
 
-        self._cache.set(cache_key, matches)
+        self._cache.set(cache_key, matches, ttl=3600)
         return matches
 
     def extract_primary(self, text: str) -> Optional[CallsignMatch]:
@@ -182,102 +265,20 @@ class CallsignExtractor:
         # Return highest confidence match
         return max(matches, key=lambda m: m.confidence)
 
-    def _process_match(
-        self, match: re.Match, pattern_type: str, original_text: str
-    ) -> Optional[CallsignMatch]:
-        """Process a regex match into a CallsignMatch."""
-        if pattern_type == 'airline':
-            name = match.group(1).upper()
-            number = re.sub(r'\s+', '', match.group(2))
-            callsign = f"{name} {number}"
-
-            # Look up in database
-            operator, icao = self._callsign_db.get(name, (None, None))
-            confidence = 0.9 if operator else 0.6
-
-            return CallsignMatch(
-                callsign=callsign,
-                operator=operator,
-                icao=icao,
-                confidence=confidence,
-                start_pos=match.start(),
-                end_pos=match.end()
-            )
-
-        elif pattern_type == 'icao':
-            icao_code = match.group(1).upper()
-            number = match.group(2).upper()
-            callsign = f"{icao_code}{number}"
-
-            # Reverse lookup by ICAO
-            operator = None
-            for name, (op, code) in self._callsign_db.items():
-                if code == icao_code:
-                    operator = op
-                    break
-
-            return CallsignMatch(
-                callsign=callsign,
-                operator=operator,
-                icao=icao_code,
-                confidence=0.85,
-                start_pos=match.start(),
-                end_pos=match.end()
-            )
-
-        elif pattern_type in ('us_registration', 'eu_registration'):
-            registration = match.group(1).upper()
-            return CallsignMatch(
-                callsign=registration,
-                operator=None,
-                icao=None,
-                confidence=0.95,  # Registrations are very distinctive
-                start_pos=match.start(),
-                end_pos=match.end()
-            )
-
-        elif pattern_type == 'military':
-            name = match.group(1).upper()
-            # Reconstruct number from phonetics
-            number_part = match.group(3)
-            if number_part:
-                number = PHONETIC_NUMBERS.get(number_part.upper(), number_part)
-            else:
-                number = ''
-            if match.group(2):  # ZERO prefix
-                number = '0' + number
-            callsign = f"{name} {number}".strip()
-
-            return CallsignMatch(
-                callsign=callsign,
-                operator=None,
-                icao=None,
-                confidence=0.5,  # Military callsigns harder to verify
-                start_pos=match.start(),
-                end_pos=match.end()
-            )
-
-        return None
-
-    def _deduplicate_matches(
-        self, matches: list[CallsignMatch]
-    ) -> list[CallsignMatch]:
+    def _deduplicate_matches(self, matches: List[CallsignMatch]) -> List[CallsignMatch]:
         """Remove overlapping matches, keeping highest confidence."""
         if not matches:
             return []
 
-        # Sort by start position
         sorted_matches = sorted(matches, key=lambda m: m.start_pos)
         result = []
 
         for match in sorted_matches:
-            # Check if overlaps with any existing result
             overlaps = False
             for i, existing in enumerate(result):
                 if (match.start_pos < existing.end_pos and
                     match.end_pos > existing.start_pos):
                     overlaps = True
-                    # Keep higher confidence
                     if match.confidence > existing.confidence:
                         result[i] = match
                     break
@@ -297,11 +298,22 @@ def get_extractor() -> CallsignExtractor:
     global _default_extractor
     if _default_extractor is None:
         _default_extractor = CallsignExtractor()
+        _default_extractor.load_callsigns_from_csv('callsigns.csv')
+        # Also try to load from database
         try:
-            _default_extractor.load_callsigns_from_csv('callsigns.csv')
-        except FileNotFoundError:
-            pass
+            from processor.db import query_all
+            rows = query_all("SELECT callsign, operator, icao FROM callsign_mappings")
+            _default_extractor.load_callsigns_from_db(rows)
+        except Exception:
+            pass  # Table might not exist yet
     return _default_extractor
+
+
+def reload_extractor() -> None:
+    """Force reload of the callsign extractor."""
+    global _default_extractor
+    _default_extractor = None
+    get_extractor()
 
 
 def extract_callsign(text: str) -> Optional[str]:
