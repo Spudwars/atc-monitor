@@ -1,0 +1,21 @@
+# Core dependencies
+flask>=2.0
+pandas>=1.5
+
+# Audio processing (for future use)
+# torch>=2.0
+# faster-whisper>=0.9
+
+# Testing
+pytest>=7.0
+pytest-cov>=4.0
+
+# Development
+black>=23.0
+ruff>=0.1
+
+# Future dependencies (uncomment when needed)
+# numpy>=1.24
+# librosa>=0.10  # Audio processing
+# webrtcvad>=2.0.10  # Voice Activity Detection
+# noisereduce>=2.0  # Noise reduction
